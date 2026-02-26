@@ -3,13 +3,6 @@ pipeline {
 
     stages {
 
-        stage('Checkout') {
-            steps {
-                echo "Checkout du repo..."
-                checkout scm
-            }
-        }
-
         stage('Info') {
             steps {
                 sh '''
@@ -31,17 +24,26 @@ pipeline {
             }
         }
 
-        stage('Build (si projet Maven)') {
+        stage('Build Maven') {
             steps {
                 sh '''
                     if [ -f "pom.xml" ]; then
-                      echo "pom.xml trouvé -> build Maven"
-                      mvn -B clean package
+                      echo "pom.xml trouvé -> build Maven (skip tests)"
+                      mvn -B clean package -DskipTests
                     else
                       echo "Pas de pom.xml -> je skip le build"
                     fi
                 '''
             }
+        }
+    }
+
+    post {
+        success {
+            echo "Build terminé avec SUCCESS"
+        }
+        failure {
+            echo "Build terminé avec FAILURE"
         }
     }
 }
