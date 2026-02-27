@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         DOCKER_IMAGE = "oumayma15/student-management"
-        DOCKER_CREDENTIALS_ID = "dockerhub-credentials"
+        DOCKER_CREDENTIALS_ID = "123"
     }
 
     stages {
@@ -29,11 +29,13 @@ pipeline {
         stage('Login to DockerHub') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: 123,
+                    credentialsId: "${DOCKER_CREDENTIALS_ID}",
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    sh '''
+                      echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                    '''
                 }
             }
         }
