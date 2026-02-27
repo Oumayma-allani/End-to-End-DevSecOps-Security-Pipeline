@@ -1,49 +1,47 @@
 pipeline {
     agent any
 
+    environment {
+        DOCKER_IMAGE = "oumayma15/student-management"
+        DOCKER_CREDENTIALS_ID = "dockerhub-credentials"
+    }
+
     stages {
 
-        stage('Info') {
+        stage('Checkout') {
             steps {
-                sh '''
-                    echo "Bonjour Jenkins"
-                    echo "Date système :"
-                    date
-                    echo "Java :"
-                    java -version || true
-                '''
-            }
-        }
-
-        stage('Check Maven') {
-            steps {
-                sh '''
-                    echo "Vérification Maven :"
-                    mvn -version || echo "Maven n'est pas installé"
-                '''
+                checkout scm
             }
         }
 
         stage('Build Maven') {
             steps {
-                sh '''
-                    if [ -f "pom.xml" ]; then
-                      echo "pom.xml trouvé -> build Maven (skip tests)"
-                      mvn -B clean package -DskipTests
-                    else
-                      echo "Pas de pom.xml -> je skip le build"
-                    fi
-                '''
+                sh 'mvn clean package -DskipTests'
             }
         }
-    }
 
-    post {
-        success {
-            echo "Build terminé avec SUCCESS"
+        stage('Build Docker Image') {
+            steps {
+                sh 'docker build -t $DOCKER_IMAGE:latest .'
+            }
         }
-        failure {
-            echo "Build terminé avec FAILURE"
+
+        stage('Login to DockerHub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: DOCKER_CREDENTIALS_ID,
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                sh 'docker push $DOCKER_IMAGE:latest'
+            }
         }
     }
 }
