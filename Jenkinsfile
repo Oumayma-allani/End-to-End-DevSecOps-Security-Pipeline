@@ -4,6 +4,8 @@ pipeline {
     environment {
         DOCKER_IMAGE = "oumayma15/student-management"
         DOCKER_CREDENTIALS_ID = "123"
+        SONARQUBE_SERVER = "SonarQube"
+        SONAR_PROJECT_KEY = "student-management"
     }
 
     stages {
@@ -20,6 +22,17 @@ pipeline {
             }
         }
 
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv("${SONARQUBE_SERVER}") {
+                    sh """
+                      mvn sonar:sonar \
+                        -Dsonar.projectKey=${SONAR_PROJECT_KEY}
+                    """
+                }
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 sh 'docker build -t $DOCKER_IMAGE:latest .'
@@ -33,9 +46,7 @@ pipeline {
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh '''
-                      echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                    '''
+                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
                 }
             }
         }
