@@ -2,9 +2,11 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "student-management:latest"
+        DOCKER_IMAGE = "oumayma15/student-management"
+        DOCKER_CREDENTIALS_ID = "123"
         NAMESPACE = "devops"
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
+        K8S_DIR = "/home/vagrant/student-management/k8s"
     }
 
     stages {
@@ -23,36 +25,47 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t $IMAGE_NAME .'
+                sh 'docker build -t $DOCKER_IMAGE:latest .'
             }
         }
 
-        stage('Load Image into Minikube') {
+        stage('Login to DockerHub') {
             steps {
-                sh 'minikube image load $IMAGE_NAME'
+                withCredentials([usernamePassword(
+                    credentialsId: "${DOCKER_CREDENTIALS_ID}",
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                }
             }
         }
 
-        stage('Deploy MySQL') {
+        stage('Push Docker Image') {
             steps {
-                sh 'kubectl apply -f k8s/pv-sql.yaml'
-                sh 'kubectl apply -f k8s/pvc-sql.yaml'
-                sh 'kubectl apply -f k8s/deploy-sql.yaml'
-                sh 'kubectl apply -f k8s/service-sql.yaml'
+                sh 'docker push $DOCKER_IMAGE:latest'
             }
         }
 
-        stage('Deploy Spring Boot') {
+        stage('Kubernetes Deploy') {
             steps {
-                sh 'kubectl apply -f k8s/configmap-spring.yaml'
-                sh 'kubectl apply -f k8s/secret-spring.yaml'
-                sh 'kubectl apply -f k8s/deploy-spring.yaml'
-                sh 'kubectl apply -f k8s/service-spring.yaml'
+                sh 'kubectl get nodes'
+                sh 'kubectl get pods -n $NAMESPACE || true'
             }
         }
 
-        stage('Restart Spring Deployment') {
+        stage('Deploy MySQL & Spring Boot on K8s') {
             steps {
+                sh 'kubectl apply -f $K8S_DIR/pv-sql.yaml'
+                sh 'kubectl apply -f $K8S_DIR/pvc-sql.yaml'
+                sh 'kubectl apply -f $K8S_DIR/deploy-sql.yaml'
+                sh 'kubectl apply -f $K8S_DIR/service-sql.yaml'
+
+                sh 'kubectl apply -f $K8S_DIR/configmap-spring.yaml'
+                sh 'kubectl apply -f $K8S_DIR/secret-spring.yaml'
+                sh 'kubectl apply -f $K8S_DIR/deploy-spring.yaml'
+                sh 'kubectl apply -f $K8S_DIR/service-spring.yaml'
+
                 sh 'kubectl rollout restart deployment spring-app-deployment -n $NAMESPACE'
             }
         }
