@@ -2,10 +2,9 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_IMAGE = "oumayma15/student-management"
-        DOCKER_CREDENTIALS_ID = "123"
-        SONARQUBE_SERVER = "SonarQube"
-        SONAR_PROJECT_KEY = "student-management"
+        IMAGE_NAME = "student-management:latest"
+        NAMESPACE = "devops"
+        KUBECONFIG = "/var/lib/jenkins/.kube/config"
     }
 
     stages {
@@ -22,39 +21,56 @@ pipeline {
             }
         }
 
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv("${SONARQUBE_SERVER}") {
-                    sh """
-                      mvn sonar:sonar \
-                        -Dsonar.projectKey=${SONAR_PROJECT_KEY}
-                    """
-                }
-            }
-        }
-
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t $DOCKER_IMAGE:latest .'
+                sh 'docker build -t $IMAGE_NAME .'
             }
         }
 
-        stage('Login to DockerHub') {
+        stage('Load Image into Minikube') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: "${DOCKER_CREDENTIALS_ID}",
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
-                }
+                sh 'minikube image load $IMAGE_NAME'
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Deploy MySQL') {
             steps {
-                sh 'docker push $DOCKER_IMAGE:latest'
+                sh 'kubectl apply -f k8s/pv-sql.yaml'
+                sh 'kubectl apply -f k8s/pvc-sql.yaml'
+                sh 'kubectl apply -f k8s/deploy-sql.yaml'
+                sh 'kubectl apply -f k8s/service-sql.yaml'
             }
+        }
+
+        stage('Deploy Spring Boot') {
+            steps {
+                sh 'kubectl apply -f k8s/configmap-spring.yaml'
+                sh 'kubectl apply -f k8s/secret-spring.yaml'
+                sh 'kubectl apply -f k8s/deploy-spring.yaml'
+                sh 'kubectl apply -f k8s/service-spring.yaml'
+            }
+        }
+
+        stage('Restart Spring Deployment') {
+            steps {
+                sh 'kubectl rollout restart deployment spring-app-deployment -n $NAMESPACE'
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh 'kubectl get pods -n $NAMESPACE'
+                sh 'kubectl get svc -n $NAMESPACE'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline exécutée avec succès.'
+        }
+        failure {
+            echo 'La pipeline a échoué.'
         }
     }
 }
