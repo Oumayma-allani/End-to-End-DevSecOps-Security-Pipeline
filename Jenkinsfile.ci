@@ -10,9 +10,11 @@ pipeline {
 
     environment {
         BUILDKIT_HOST = 'tcp://buildkit:1234'
+        IMAGE_NAME = 'docker.io/oumayma15/student-management'
     }
 
     stages {
+
         stage('Checkout GitHub') {
             steps {
                 checkout scm
@@ -31,53 +33,51 @@ pipeline {
             }
         }
 
-        
-stage('Build and Push Docker Image') {
-    steps {
-        withCredentials([
-            usernamePassword(
-                credentialsId: 'dockerhub-credentials',
-                usernameVariable: 'DOCKERHUB_USER',
-                passwordVariable: 'DOCKERHUB_TOKEN'
-            )
-        ]) {
-            sh '''
-                set +x
-                set -eu
+        stage('Build and Push Docker Image') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
 
-                mkdir -p "$WORKSPACE/.docker-buildkit"
-                chmod 700 "$WORKSPACE/.docker-buildkit"
+                        export DOCKER_CONFIG="$(mktemp -d)"
+                        chmod 700 "$DOCKER_CONFIG"
+                        trap 'rm -rf "$DOCKER_CONFIG"' EXIT
 
-                AUTH=$(printf '%s:%s' "$DOCKERHUB_USER" "$DOCKERHUB_TOKEN" | base64 | tr -d '\\n')
+                        AUTH=$(printf '%s:%s' \
+                            "$DOCKERHUB_USER" \
+                            "$DOCKERHUB_TOKEN" \
+                            | base64 | tr -d '\\n')
 
-                printf '{"auths":{"https://index.docker.io/v1/":{"auth":"%s"}}}' "$AUTH" \
-                    > "$WORKSPACE/.docker-buildkit/config.json"
+                        printf '{"auths":{"https://index.docker.io/v1/":{"auth":"%s"}}}' \
+                            "$AUTH" > "$DOCKER_CONFIG/config.json"
 
-                chmod 600 "$WORKSPACE/.docker-buildkit/config.json"
+                        chmod 600 "$DOCKER_CONFIG/config.json"
 
-                export DOCKER_CONFIG="$WORKSPACE/.docker-buildkit"
-
-                trap 'rm -rf "$WORKSPACE/.docker-buildkit"' EXIT
-
-                buildctl --addr "$BUILDKIT_HOST" build \
-                    --frontend dockerfile.v0 \
-                    --local context=. \
-                    --local dockerfile=. \
-                    --output type=image,name=docker.io/oumayma15/student-management:latest,push=true
-
-                echo "Image publiée sur Docker Hub."
-            '''
+                        buildctl --addr "$BUILDKIT_HOST" build \
+                            --frontend dockerfile.v0 \
+                            --local context=. \
+                            --local dockerfile=. \
+                            --output "type=image,name=$IMAGE_NAME:latest,push=true"
+                    '''
+                }
+            }
         }
     }
-}
 
     post {
         success {
-            echo 'CI : Maven et BuildKit exécutés avec succès !'
+            echo 'CI : Image construite et publiée sur Docker Hub !'
         }
+
         failure {
-            echo 'CI : La pipeline a échoué.'
+            echo 'CI : Échec de la pipeline.'
         }
     }
 }
-
