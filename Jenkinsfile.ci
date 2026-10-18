@@ -11,6 +11,8 @@ pipeline {
     environment {
         BUILDKIT_HOST = 'tcp://buildkit:1234'
         IMAGE_NAME = 'docker.io/oumayma15/student-management'
+        K8S_SERVER = 'https://host.docker.internal:59061'
+        K8S_NAMESPACE = 'student-management'
     }
 
     stages {
@@ -69,15 +71,54 @@ pipeline {
                 }
             }
         }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                withCredentials([
+                    string(
+                        credentialsId: 'kubernetes-deployer-token',
+                        variable: 'K8S_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
+
+                        kubectl \
+                          --server="$K8S_SERVER" \
+                          --insecure-skip-tls-verify \
+                          --token="$K8S_TOKEN" \
+                          -n "$K8S_NAMESPACE" \
+                          set image deployment/student-management \
+                          student-management="$IMAGE_NAME:latest"
+
+                        kubectl \
+                          --server="$K8S_SERVER" \
+                          --insecure-skip-tls-verify \
+                          --token="$K8S_TOKEN" \
+                          -n "$K8S_NAMESPACE" \
+                          rollout restart deployment/student-management
+
+                        kubectl \
+                          --server="$K8S_SERVER" \
+                          --insecure-skip-tls-verify \
+                          --token="$K8S_TOKEN" \
+                          -n "$K8S_NAMESPACE" \
+                          rollout status deployment/student-management \
+                          --timeout=180s
+                    '''
+                }
+            }
+        }
     }
 
     post {
         success {
-            echo 'CI : Image construite et publiée sur Docker Hub !'
+            echo 'CI/CD SUCCESS : Image publiée sur Docker Hub et application déployée sur Kubernetes !'
         }
 
         failure {
-            echo 'CI : Échec de la pipeline.'
+            echo 'CI/CD FAILED : Vérifier les logs Jenkins.'
         }
     }
 }
