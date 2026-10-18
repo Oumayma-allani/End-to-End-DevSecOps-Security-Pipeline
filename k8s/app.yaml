@@ -1,0 +1,62 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: student-management
+  namespace: student-management
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: student-management
+  template:
+    metadata:
+      labels:
+        app: student-management
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+
+      containers:
+        - name: student-management
+          image: oumayma15/student-management:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8089
+
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:mysql://mysql:3306/studentdb
+
+            - name: SPRING_DATASOURCE_USERNAME
+              value: student
+
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
+
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 100m
+            limits:
+              memory: 768Mi
+              cpu: 500m
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: student-management
+  namespace: student-management
+spec:
+  type: ClusterIP
+  selector:
+    app: student-management
+  ports:
+    - port: 8089
+      targetPort: 8089
