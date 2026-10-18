@@ -1,9 +1,15 @@
 
 pipeline {
-    agent any
+    agent {
+        label 'docker-builder'
+    }
 
     tools {
         maven 'Maven3'
+    }
+
+    environment {
+        BUILDKIT_HOST = 'tcp://buildkit:1234'
     }
 
     stages {
@@ -24,15 +30,33 @@ pipeline {
                 sh 'ls -lh target/*.jar'
             }
         }
+
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                    buildctl --addr "$BUILDKIT_HOST" build \
+                      --frontend dockerfile.v0 \
+                      --local context=. \
+                      --local dockerfile=. \
+                      --output type=oci,dest=student-management.tar
+                '''
+            }
+        }
+
+        stage('Verify Image') {
+            steps {
+                sh 'ls -lh student-management.tar'
+            }
+        }
     }
 
     post {
         success {
-            echo 'CI : Build Maven réussi !'
+            echo 'CI : Maven et BuildKit exécutés avec succès !'
         }
-
         failure {
-            echo 'CI : Échec de la compilation.'
+            echo 'CI : La pipeline a échoué.'
         }
     }
 }
+
