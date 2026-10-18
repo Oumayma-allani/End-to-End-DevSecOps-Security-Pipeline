@@ -1,0 +1,38 @@
+
+pipeline {
+    agent any
+
+    tools {
+        maven 'Maven3'
+    }
+
+    stages {
+        stage('Checkout GitHub') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Maven') {
+            steps {
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+
+        stage('Verify JAR') {
+            steps {
+                sh 'ls -lh target/*.jar'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'CI : Build Maven réussi !'
+        }
+
+        failure {
+            echo 'CI : Échec de la compilation.'
+        }
+    }
+}
