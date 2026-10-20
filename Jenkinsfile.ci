@@ -35,6 +35,28 @@ pipeline {
             }
         }
 
+        stage('SonarQube Analysis') {
+            steps {
+                withCredentials([
+                    string(
+                        credentialsId: 'sonarqube-token',
+                        variable: 'SONAR_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
+
+                        mvn sonar:sonar \
+                          -Dsonar.projectKey=student-management \
+                          -Dsonar.projectName=student-management \
+                          -Dsonar.host.url=http://sonarqube:9000 \
+                          -Dsonar.token="$SONAR_TOKEN"
+                    '''
+                }
+            }
+        }
+
         stage('Build and Push Docker Image') {
             steps {
                 withCredentials([
