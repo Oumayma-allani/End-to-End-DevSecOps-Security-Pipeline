@@ -35,6 +35,7 @@ pipeline {
             }
         }
 
+
         stage('SonarQube Analysis') {
             steps {
                 withCredentials([
@@ -47,7 +48,7 @@ pipeline {
                         set +x
                         set -eu
 
-                        mvn sonar:sonar \
+                        mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
                           -Dsonar.projectKey=student-management \
                           -Dsonar.projectName=student-management \
                           -Dsonar.host.url=http://sonarqube:9000 \
