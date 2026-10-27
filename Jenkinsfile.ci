@@ -135,13 +135,42 @@ pipeline {
         }
     }
 
+
     post {
         success {
             echo 'CI/CD SUCCESS : Image publiée sur Docker Hub et application déployée sur Kubernetes !'
+
+            emailext(
+                subject: "SUCCESS - Jenkins CI/CD - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+                    Pipeline CI/CD exécuté avec succès !
+
+                    Projet : ${env.JOB_NAME}
+                    Build : #${env.BUILD_NUMBER}
+                    Statut : SUCCESS
+
+                    Jenkins : ${env.BUILD_URL}
+                """,
+                to: 'allanimimou@gmail.com'
+            )
         }
 
         failure {
             echo 'CI/CD FAILED : Vérifier les logs Jenkins.'
+
+            emailext(
+                subject: "FAILURE - Jenkins CI/CD - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+                    Le pipeline CI/CD a échoué.
+
+                    Projet : ${env.JOB_NAME}
+                    Build : #${env.BUILD_NUMBER}
+                    Statut : FAILURE
+
+                    Consulter les logs : ${env.BUILD_URL}
+                """,
+                to: 'allanimimou@gmail.com'
+            )
         }
     }
-}
+
