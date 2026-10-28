@@ -58,6 +58,41 @@ pipeline {
             }
         }
 
+
+
+        stage('OWASP Dependency-Check') {
+            steps {
+                withCredentials([
+                    string(
+                        credentialsId: 'nvd-api-key',
+                        variable: 'NVD_API_KEY'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
+
+                        mvn org.owasp:dependency-check-maven:13.0.0:check \
+                          -DnvdApiKeyEnvironmentVariable=NVD_API_KEY \
+                          -DfailBuildOnCVSS=11 \
+                          -Dformat=HTML
+
+                        echo "OWASP Dependency-Check : analyse terminée."
+                    '''
+                }
+            }
+
+            post {
+                always {
+                    archiveArtifacts(
+                        artifacts: 'target/dependency-check-report.html',
+                        allowEmptyArchive: true
+                    )
+                }
+            }
+        }
+
+
         stage('Build and Push Docker Image') {
             steps {
                 withCredentials([
