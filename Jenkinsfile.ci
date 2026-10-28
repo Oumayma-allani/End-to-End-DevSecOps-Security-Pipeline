@@ -74,6 +74,8 @@ pipeline {
 
                         mvn org.owasp:dependency-check-maven:13.0.0:check \
                           -DnvdApiKeyEnvironmentVariable=NVD_API_KEY \
+		          -DnvdApiDelay=6000 \
+  			  -DnvdMaxRetryCount=10 \
                           -DfailBuildOnCVSS=11 \
                           -Dformat=HTML
 
