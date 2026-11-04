@@ -23,7 +23,7 @@ pipeline {
             }
         }
 
-        // SECURITY: Static Code Analysis
+        // DEVELOPMENT: STATIC CODE ANALYSIS
         stage('SonarQube Analysis') {
             steps {
                 withCredentials([
@@ -36,8 +36,6 @@ pipeline {
                         set +x
                         set -eu
 
-                        # SonarQube Java requires compiled classes
-                        # Compile only; do not package the JAR yet
                         mvn -B -DskipTests compile
 
                         mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
@@ -50,7 +48,7 @@ pipeline {
             }
         }
 
-        // SECURITY: Software Composition Analysis (SCA)
+        // DEVELOPMENT: SOFTWARE COMPOSITION ANALYSIS
         stage('OWASP Dependency-Check') {
             steps {
                 withCredentials([
@@ -85,7 +83,7 @@ pipeline {
             }
         }
 
-        // BUILD AFTER SECURITY ANALYSIS
+        // BUILD MAVEN
         stage('Build Maven') {
             steps {
                 sh 'mvn clean package -DskipTests'
@@ -98,6 +96,7 @@ pipeline {
             }
         }
 
+        // DOCKER BUILD AND PUSH
         stage('Build and Push Docker Image') {
             steps {
                 withCredentials([
@@ -135,6 +134,7 @@ pipeline {
             }
         }
 
+        // DEPLOYMENT TO KUBERNETES
         stage('Deploy to Kubernetes') {
             steps {
                 withCredentials([
@@ -173,8 +173,97 @@ pipeline {
                 }
             }
         }
+
+        // ACCEPTANCE: NMAP SECURITY SCANNING
+        stage('Nmap Security Scan') {
+            steps {
+                withCredentials([
+                    string(
+                        credentialsId: 'kubernetes-deployer-token',
+                        variable: 'K8S_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
+
+                        mkdir -p reports
+
+                        echo "Starting Kubernetes port-forward..."
+
+                        kubectl \
+                          --server="$K8S_SERVER" \
+                          --insecure-skip-tls-verify \
+                          --token="$K8S_TOKEN" \
+                          -n "$K8S_NAMESPACE" \
+                          port-forward --address 127.0.0.1 \
+                          svc/student-management 8089:8089 \
+                          > reports/port-forward.log 2>&1 &
+
+                        PF_PID=$!
+
+                        trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
+
+                        echo "Waiting for port-forward..."
+
+                        READY=0
+
+                        for i in $(seq 1 15); do
+                            if grep -q "Forwarding from 127.0.0.1:8089" \
+                                reports/port-forward.log; then
+                                READY=1
+                                break
+                            fi
+
+                            if ! kill -0 "$PF_PID" 2>/dev/null; then
+                                echo "Port-forward stopped unexpectedly."
+                                cat reports/port-forward.log
+                                exit 1
+                            fi
+
+                            sleep 2
+                        done
+
+                        if [ "$READY" -ne 1 ]; then
+                            echo "Port-forward did not become ready."
+                            cat reports/port-forward.log
+                            exit 1
+                        fi
+
+                        echo "Running Nmap Security Scan..."
+
+                        nmap -sT -sV -Pn \
+                          -p 8089 \
+                          -oN reports/nmap-scan.txt \
+                          -oX reports/nmap-scan.xml \
+                          -oG reports/nmap-scan.gnmap \
+                          127.0.0.1
+
+                        echo "Checking expected port..."
+
+                        if ! grep -q "8089/open/tcp" \
+                            reports/nmap-scan.gnmap; then
+                            echo "SECURITY CHECK FAILED: Port 8089 is not open."
+                            exit 1
+                        fi
+
+                        echo "Nmap Security Scan completed successfully."
+                    '''
+                }
+            }
+
+            post {
+                always {
+                    archiveArtifacts(
+                        artifacts: 'reports/nmap-scan.*',
+                        allowEmptyArchive: true
+                    )
+                }
+            }
+        }
     }
 
+    // EMAIL NOTIFICATIONS
     post {
         success {
             echo 'CI/CD SUCCESS : Image publiée sur Docker Hub et application déployée sur Kubernetes !'
@@ -182,11 +271,16 @@ pipeline {
             emailext(
                 subject: "SUCCESS - Jenkins CI/CD - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                 body: """
-                    Pipeline CI/CD exécuté avec succès !
+                    Pipeline DevSecOps exécuté avec succès !
 
                     Projet : ${env.JOB_NAME}
                     Build : #${env.BUILD_NUMBER}
                     Statut : SUCCESS
+
+                    Security:
+                    - SonarQube Analysis
+                    - OWASP Dependency-Check
+                    - Nmap Security Scan
 
                     Jenkins : ${env.BUILD_URL}
                 """,
@@ -200,7 +294,7 @@ pipeline {
             emailext(
                 subject: "FAILURE - Jenkins CI/CD - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                 body: """
-                    Le pipeline CI/CD a échoué.
+                    Le pipeline DevSecOps a échoué.
 
                     Projet : ${env.JOB_NAME}
                     Build : #${env.BUILD_NUMBER}
@@ -213,4 +307,3 @@ pipeline {
         }
     }
 }
-
