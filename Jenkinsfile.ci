@@ -23,19 +23,7 @@ pipeline {
             }
         }
 
-        stage('Build Maven') {
-            steps {
-                sh 'mvn clean package -DskipTests'
-            }
-        }
-
-        stage('Verify JAR') {
-            steps {
-                sh 'ls -lh target/*.jar'
-            }
-        }
-
-
+        // SECURITY: Static Code Analysis
         stage('SonarQube Analysis') {
             steps {
                 withCredentials([
@@ -48,6 +36,10 @@ pipeline {
                         set +x
                         set -eu
 
+                        # SonarQube Java requires compiled classes
+                        # Compile only; do not package the JAR yet
+                        mvn -B -DskipTests compile
+
                         mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
                           -Dsonar.projectKey=student-management \
                           -Dsonar.projectName=student-management \
@@ -58,8 +50,7 @@ pipeline {
             }
         }
 
-
-
+        // SECURITY: Software Composition Analysis (SCA)
         stage('OWASP Dependency-Check') {
             steps {
                 withCredentials([
@@ -74,8 +65,8 @@ pipeline {
 
                         mvn org.owasp:dependency-check-maven:13.0.0:check \
                           -DnvdApiKeyEnvironmentVariable=NVD_API_KEY \
-		          -DnvdApiDelay=6000 \
-  			  -DnvdMaxRetryCount=10 \
+                          -DnvdApiDelay=6000 \
+                          -DnvdMaxRetryCount=10 \
                           -DfailBuildOnCVSS=11 \
                           -Dformat=HTML
 
@@ -94,6 +85,18 @@ pipeline {
             }
         }
 
+        // BUILD AFTER SECURITY ANALYSIS
+        stage('Build Maven') {
+            steps {
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+
+        stage('Verify JAR') {
+            steps {
+                sh 'ls -lh target/*.jar'
+            }
+        }
 
         stage('Build and Push Docker Image') {
             steps {
@@ -172,7 +175,6 @@ pipeline {
         }
     }
 
-
     post {
         success {
             echo 'CI/CD SUCCESS : Image publiée sur Docker Hub et application déployée sur Kubernetes !'
@@ -210,5 +212,5 @@ pipeline {
             )
         }
     }
-
 }
+
