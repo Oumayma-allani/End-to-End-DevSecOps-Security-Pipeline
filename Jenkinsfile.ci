@@ -188,66 +188,62 @@ pipeline {
                         set -eu
 
                         mkdir -p reports
+                        rm -f reports/nmap-scan.*
 
-                        echo "Starting Kubernetes port-forward..."
+                        POD="nmap-ci-${BUILD_NUMBER}"
 
-                        kubectl \
-                          --server="$K8S_SERVER" \
-                          --insecure-skip-tls-verify \
-                          --token="$K8S_TOKEN" \
-                          -n "$K8S_NAMESPACE" \
-                          port-forward --address 127.0.0.1 \
-                          svc/student-management 8089:8089 \
-                          > reports/port-forward.log 2>&1 &
+                        kctl() {
+                            kubectl \
+                              --server="$K8S_SERVER" \
+                              --insecure-skip-tls-verify \
+                              --token="$K8S_TOKEN" \
+                              -n "$K8S_NAMESPACE" "$@"
+                        }
 
-                        PF_PID=$!
-
-                        trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
-
-                        echo "Waiting for port-forward..."
-
-                        READY=0
-
-                        for i in $(seq 1 15); do
-                            if grep -q "Forwarding from 127.0.0.1:8089" \
-                                reports/port-forward.log; then
-                                READY=1
-                                break
+                        cleanup() {
+                            if [ ! -s reports/nmap-scan.txt ]; then
+                                kctl logs "$POD" \
+                                  > reports/nmap-scan.txt 2>&1 || true
                             fi
 
-                            if ! kill -0 "$PF_PID" 2>/dev/null; then
-                                echo "Port-forward stopped unexpectedly."
-                                cat reports/port-forward.log
-                                exit 1
-                            fi
+                            kctl delete pod "$POD" \
+                              --ignore-not-found=true \
+                              --wait=false > /dev/null 2>&1 || true
+                        }
 
-                            sleep 2
-                        done
+                        trap cleanup EXIT
 
-                        if [ "$READY" -ne 1 ]; then
-                            echo "Port-forward did not become ready."
-                            cat reports/port-forward.log
+                        echo "Creating Nmap scanner pod..."
+
+                        kctl run "$POD" \
+                          --image=instrumentisto/nmap:7.98-r2 \
+                          --restart=Never \
+                          --command -- \
+                          nmap -sT -sV -Pn \
+                          -p 1-1024,8080,8089,8443 \
+                          student-management
+
+                        echo "Waiting for Nmap scan to finish..."
+
+                        kctl wait \
+                          --for=jsonpath='{.status.phase}'=Succeeded \
+                          "pod/$POD" \
+                          --timeout=480s
+
+                        echo "Collecting Nmap report..."
+
+                        kctl logs "$POD" | tee reports/nmap-scan.txt
+
+                        echo "Checking application port..."
+
+                        if ! grep -Eq '^8089/tcp[[:space:]]+open' \
+                            reports/nmap-scan.txt; then
+                            echo "FAILED: Expected port 8089 not open."
                             exit 1
                         fi
 
-                        echo "Running Nmap Security Scan..."
-
-                        nmap -sT -sV -Pn \
-                          -p 8089 \
-                          -oN reports/nmap-scan.txt \
-                          -oX reports/nmap-scan.xml \
-                          -oG reports/nmap-scan.gnmap \
-                          127.0.0.1
-
-                        echo "Checking expected port..."
-
-                        if ! grep -q "8089/open/tcp" \
-                            reports/nmap-scan.gnmap; then
-                            echo "SECURITY CHECK FAILED: Port 8089 is not open."
-                            exit 1
-                        fi
-
-                        echo "Nmap Security Scan completed successfully."
+                        echo "Nmap scan completed successfully."
+                        echo "Report saved: reports/nmap-scan.txt"
                     '''
                 }
             }
@@ -255,7 +251,7 @@ pipeline {
             post {
                 always {
                     archiveArtifacts(
-                        artifacts: 'reports/nmap-scan.*',
+                        artifacts: 'reports/nmap-scan.txt',
                         allowEmptyArchive: true
                     )
                 }
