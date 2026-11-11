@@ -68,7 +68,7 @@ pipeline {
                           -DfailBuildOnCVSS=11 \
                           -Dformat=HTML
 
-                        echo "OWASP Dependency-Check : analyse terminée."
+                        echo "OWASP Dependency-Check completed."
                     '''
                 }
             }
@@ -174,7 +174,7 @@ pipeline {
             }
         }
 
-        // ACCEPTANCE: NMAP SECURITY SCANNING
+        // ACCEPTANCE: NMAP SECURITY SCAN
         stage('Nmap Security Scan') {
             steps {
                 withCredentials([
@@ -243,7 +243,6 @@ pipeline {
                         fi
 
                         echo "Nmap scan completed successfully."
-                        echo "Report saved: reports/nmap-scan.txt"
                     '''
                 }
             }
@@ -257,12 +256,153 @@ pipeline {
                 }
             }
         }
+
+        // PRODUCTION: OWASP ZAP SECURITY SMOKE TEST
+        stage('OWASP ZAP Baseline Scan') {
+            steps {
+                withCredentials([
+                    string(
+                        credentialsId: 'kubernetes-deployer-token',
+                        variable: 'K8S_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
+
+                        mkdir -p reports
+                        rm -f reports/zap-report.html \
+                              reports/zap-scan.log
+
+                        POD="zap-ci-${BUILD_NUMBER}"
+
+                        kctl() {
+                            kubectl \
+                              --server="$K8S_SERVER" \
+                              --insecure-skip-tls-verify \
+                              --token="$K8S_TOKEN" \
+                              -n "$K8S_NAMESPACE" "$@"
+                        }
+
+                        cleanup() {
+                            kctl delete pod "$POD" \
+                              --ignore-not-found=true \
+                              --wait=false > /dev/null 2>&1 || true
+                        }
+
+                        trap cleanup EXIT
+
+                        echo "Creating OWASP ZAP pod..."
+
+                        kctl create -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${POD}
+  namespace: ${K8S_NAMESPACE}
+spec:
+  restartPolicy: Never
+  securityContext:
+    fsGroup: 1000
+  containers:
+    - name: zap
+      image: zaproxy/zap-stable:latest
+      imagePullPolicy: IfNotPresent
+      command: ["zap-baseline.py"]
+      args:
+        - "-t"
+        - "http://student-management:8089/student/actuator/health"
+        - "-m"
+        - "1"
+        - "-I"
+        - "-r"
+        - "zap-report.html"
+      volumeMounts:
+        - name: zap-reports
+          mountPath: /zap/wrk
+
+    - name: report-reader
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 1200"]
+      volumeMounts:
+        - name: zap-reports
+          mountPath: /reports
+          readOnly: true
+
+  volumes:
+    - name: zap-reports
+      emptyDir: {}
+EOF
+
+                        echo "Waiting for OWASP ZAP scan..."
+
+                        FINISHED=0
+                        ZAP_EXIT=""
+
+                        for i in $(seq 1 120); do
+                            ZAP_EXIT=$(kctl get pod "$POD" \
+                              -o jsonpath='{.status.containerStatuses[?(@.name=="zap")].state.terminated.exitCode}')
+
+                            if [ -n "$ZAP_EXIT" ]; then
+                                FINISHED=1
+                                break
+                            fi
+
+                            sleep 5
+                        done
+
+                        echo "Collecting ZAP logs..."
+
+                        kctl logs "$POD" -c zap \
+                          > reports/zap-scan.log 2>&1 || true
+
+                        cat reports/zap-scan.log
+
+                        if [ "$FINISHED" -ne 1 ]; then
+                            echo "FAILED: ZAP scan timed out."
+                            exit 1
+                        fi
+
+                        if [ "$ZAP_EXIT" != "0" ]; then
+                            echo "FAILED: ZAP exit code $ZAP_EXIT"
+                            exit 1
+                        fi
+
+                        echo "Retrieving ZAP HTML report..."
+
+                        kctl exec "$POD" -c report-reader -- \
+                          cat /reports/zap-report.html \
+                          > reports/zap-report.html.tmp
+
+                        if [ ! -s reports/zap-report.html.tmp ]; then
+                            echo "FAILED: ZAP HTML report is empty."
+                            exit 1
+                        fi
+
+                        mv reports/zap-report.html.tmp \
+                           reports/zap-report.html
+
+                        echo "OWASP ZAP Baseline Scan completed."
+                        echo "Report: reports/zap-report.html"
+                    '''
+                }
+            }
+
+            post {
+                always {
+                    archiveArtifacts(
+                        artifacts: 'reports/zap-report.html,reports/zap-scan.log',
+                        allowEmptyArchive: true
+                    )
+                }
+            }
+        }
     }
 
     // EMAIL NOTIFICATIONS
     post {
         success {
-            echo 'CI/CD SUCCESS : Image publiée sur Docker Hub et application déployée sur Kubernetes !'
+            echo 'DevSecOps pipeline SUCCESS.'
 
             emailext(
                 subject: "SUCCESS - Jenkins CI/CD - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
@@ -277,6 +417,7 @@ pipeline {
                     - SonarQube Analysis
                     - OWASP Dependency-Check
                     - Nmap Security Scan
+                    - OWASP ZAP Baseline Scan
 
                     Jenkins : ${env.BUILD_URL}
                 """,
@@ -285,7 +426,7 @@ pipeline {
         }
 
         failure {
-            echo 'CI/CD FAILED : Vérifier les logs Jenkins.'
+            echo 'DevSecOps pipeline FAILED.'
 
             emailext(
                 subject: "FAILURE - Jenkins CI/CD - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
