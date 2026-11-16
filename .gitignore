@@ -31,3 +31,28 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Secrets and environment configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*credentials*
+*secret*.txt
+token.txt
+
+# Kubernetes local credentials
+.kube/
+kubeconfig
+kubeconfig.*
+
+# Local reports and logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
